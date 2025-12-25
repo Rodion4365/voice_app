@@ -244,8 +244,8 @@ class MeetingCopilotApp:
         self.status_var = tk.StringVar(value="Готово. Вкладка 'О себе' и промпт будут учтены.")
         ttk.Label(c, textvariable=self.status_var).pack(fill=tk.X, pady=(8, 8))
 
-        ttk.Label(c, text="Ответ (краткий + подробный):").pack(anchor=tk.W)
-        self.answer_box = ScrolledText(c, height=14, wrap=tk.WORD)
+        ttk.Label(c, text="Ответ (краткий + подробный + пример при наличии):").pack(anchor=tk.W)
+        self.answer_box = ScrolledText(c, height=18, wrap=tk.WORD)
         self.answer_box.pack(fill=tk.BOTH, expand=True, pady=(2, 10))
 
         ttk.Label(c, text="Журнал:").pack(anchor=tk.W)
@@ -262,11 +262,11 @@ class MeetingCopilotApp:
         self.prompt_box.pack(fill=tk.BOTH, expand=False, pady=(2, 8))
         prompt_hint = (
             "Пример промпта:\n"
-            "Ты — кандидат на позицию Senior Product Manager / Senior Project Manager. "
-            "Твоя задача — отвечать структурированно от первого лица:\n"
-            "1) Краткий ответ (2-3 предложения) — суть решения\n"
-            "2) Подробно (3-5 предложений) — контекст, frameworks (RICE, ICE), trade-offs, метрики, next steps.\n"
-            "Стиль: strategic, data-driven, senior-level. Без воды и клише."
+            "Ты — Senior PM/PMO на интервью. Структура ответа:\n"
+            "1) Краткий ответ (2-3 предл.) — суть решения\n"
+            "2) Подробно (3-5 предл.) — обоснование, trade-offs\n"
+            "3) Пример из практики (ОПЦИОНАЛЬНО) — только при наличии релевантного кейса из топ-компании\n"
+            "Адаптируйся к типу вопроса. Frameworks — только когда релевантны. Не придумывай примеры."
         )
         ttk.Label(a, text=prompt_hint, foreground="#888").pack(anchor=tk.W, pady=(0, 8))
         ttk.Button(a, text="Сохранить промпт", command=self._save_prompt).pack(anchor=tk.W)
@@ -520,16 +520,24 @@ class MeetingCopilotApp:
         - если сохранён профиль — приклеиваем как контекст (модель может сослаться на релевантный опыт).
         """
         base = self.cfg.custom_prompt.strip() if self.cfg.custom_prompt else (
-            "Ты — кандидат на позицию Senior Product Manager / Senior Project Manager. "
-            "Отвечай от первого лица, структурированно (краткий ответ + подробное объяснение). "
-            "Фокус на Discovery/Delivery, frameworks (RICE, ICE, Jobs-to-be-Done), "
-            "trade-offs, метриках и конкретных next steps."
+            "Ты — опытный Senior Product Manager / Senior Project Manager на интервью. "
+            "Отвечай от первого лица, адаптируя подход к типу вопроса:\n"
+            "- Стратегические вопросы → бизнес-цели, метрики, приоритизация\n"
+            "- Тактические вопросы → конкретные шаги, инструменты, процессы\n"
+            "- Конфликтные ситуации → stakeholder management, компромиссы\n"
+            "- Поведенческие вопросы → конкретные примеры из опыта\n\n"
+            "Используй frameworks (RICE, Jobs-to-be-Done, OKR) ТОЛЬКО когда они естественно подходят к вопросу."
         )
         prompt = (
             f"{base}\n\n"
             "Ниже транскрипт вопроса с собеседования. "
-            "Дай структурированный ответ: сначала краткий (суть решения), затем подробный "
-            "(контекст, обоснование, trade-offs, next steps).\n\n"
+            "Проанализируй тип вопроса и дай релевантный ответ:\n\n"
+            "**Краткий ответ** (2-3 предложения) — прямой ответ на вопрос\n\n"
+            "**Подробно** (3-5 предложений) — обоснование, trade-offs или next steps\n\n"
+            "**Пример из практики** (ОПЦИОНАЛЬНО, 2-3 предложения) — добавь ТОЛЬКО если знаешь "
+            "конкретный релевантный кейс из топ-компании (Netflix, Amazon, Spotify, Google, Airbnb, Tesla и т.д.) "
+            "с реальными метриками. Лучше БЕЗ примера, чем с натянутым или неточным. "
+            "Не придумывай примеры — используй только известные публичные кейсы.\n\n"
             f"Вопрос (транскрипт):\n{question_text}"
         )
         if self.cfg.user_profile:
@@ -569,22 +577,30 @@ class MeetingCopilotApp:
                 messages=[
                     {"role": "system", "content": (
                         "Ты — Senior Product Manager / Senior Project Manager с 7+ годами опыта на интервью.\n\n"
-                        "ФОРМАТ ОТВЕТА:\n"
+                        "ПРИНЦИПЫ ОТВЕТА:\n"
+                        "1. Адаптируй подход к типу вопроса — не используй шаблоны\n"
+                        "2. Frameworks (RICE, Jobs-to-be-Done, OKR) — только если релевантны контексту\n"
+                        "3. Для стратегических вопросов — фокус на бизнес-целях и метриках\n"
+                        "4. Для тактических — конкретные процессы и инструменты\n"
+                        "5. Для конфликтов — stakeholder management и компромиссы\n"
+                        "6. Для поведенческих — реальные примеры и выводы\n\n"
+                        "ФОРМАТ ОТВЕТА (2-3 блока):\n\n"
                         "**Краткий ответ** (2-3 предложения, ~50-70 слов):\n"
-                        "[Прямой ответ с ключевым решением/подходом]\n\n"
+                        "[Прямой ответ на вопрос с ключевым решением]\n\n"
                         "**Подробно** (3-5 предложений, ~100-130 слов):\n"
-                        "[Контекст, обоснование через frameworks (RICE, ICE, Jobs-to-be-Done), "
-                        "trade-offs, метрики, stakeholder management, конкретные next steps]\n\n"
-                        "СТИЛЬ:\n"
-                        "- Strategic thinking: связывай решения с бизнес-целями\n"
-                        "- Data-driven: ссылайся на метрики и frameworks\n"
-                        "- Senior-level: уверенный тон, без junior-клише\n"
-                        "- Без воды и списков"
+                        "[Контекст, обоснование или примеры — в зависимости от типа вопроса. "
+                        "Используй frameworks только если они добавляют ценность.]\n\n"
+                        "**Пример из практики** (ОПЦИОНАЛЬНО, 2-3 предложения, ~60-80 слов):\n"
+                        "[Добавляй ТОЛЬКО если знаешь конкретный релевантный кейс из топ-компании "
+                        "(Netflix, Amazon, Spotify, Google, Airbnb, Tesla, Uber, etc.) с реальными публичными метриками. "
+                        "Укажи: (1) Компанию, (2) Что сделали, (3) Измеримый результат. "
+                        "ВАЖНО: Лучше БЕЗ примера, чем с натянутым или неточным. Не придумывай примеры.]\n\n"
+                        "СТИЛЬ: Уверенный senior-level, конкретный, без клише и воды."
                     )},
                     {"role": "user", "content": full_prompt},
                 ],
-                temperature=0.2,
-                max_tokens=600,  # Увеличено для краткого + подробного ответа
+                temperature=0.3,  # Немного повышено для более естественных ответов
+                max_tokens=800,  # Для 2-3 блоков (пример опциональный)
             )
             answer = cmp.choices[0].message.content.strip()
             self._append_answer(answer)
