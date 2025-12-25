@@ -189,6 +189,7 @@ class MeetingCopilotApp:
         self.recorder: AudioRecorder | None = None
         self.timer_running = False
         self.start_time = None
+        self.processing_cancelled = False  # Флаг для отмены обработки
 
         self._build_ui()
         self._load_devices_into_ui()
@@ -237,12 +238,14 @@ class MeetingCopilotApp:
         self.start_btn.pack(side=tk.LEFT)
         self.stop_btn = ttk.Button(btn, text="Остановить и проанализировать", command=self.stop_and_process, state=tk.DISABLED)
         self.stop_btn.pack(side=tk.LEFT, padx=8)
+        self.cancel_btn = ttk.Button(btn, text="Отменить", command=self.cancel_recording, state=tk.DISABLED)
+        self.cancel_btn.pack(side=tk.LEFT)
 
         self.status_var = tk.StringVar(value="Готово. Вкладка 'О себе' и промпт будут учтены.")
         ttk.Label(c, textvariable=self.status_var).pack(fill=tk.X, pady=(8, 8))
 
-        ttk.Label(c, text="Ответ (краткий):").pack(anchor=tk.W)
-        self.answer_box = ScrolledText(c, height=7, wrap=tk.WORD)
+        ttk.Label(c, text="Ответ (краткий + подробный):").pack(anchor=tk.W)
+        self.answer_box = ScrolledText(c, height=14, wrap=tk.WORD)
         self.answer_box.pack(fill=tk.BOTH, expand=True, pady=(2, 10))
 
         ttk.Label(c, text="Журнал:").pack(anchor=tk.W)
@@ -259,9 +262,11 @@ class MeetingCopilotApp:
         self.prompt_box.pack(fill=tk.BOTH, expand=False, pady=(2, 8))
         prompt_hint = (
             "Пример промпта:\n"
-            "Ты — кандидат на позицию Product Manager / Project Manager. "
-            "Твоя задача — отвечать кратко (1–2 предложения), профессионально и от первого лица. "
-            "Фокус на Discovery/Delivery, trade-offs, next steps. Без вводных и воды."
+            "Ты — кандидат на позицию Senior Product Manager / Senior Project Manager. "
+            "Твоя задача — отвечать структурированно от первого лица:\n"
+            "1) Краткий ответ (2-3 предложения) — суть решения\n"
+            "2) Подробно (3-5 предложений) — контекст, frameworks (RICE, ICE), trade-offs, метрики, next steps.\n"
+            "Стиль: strategic, data-driven, senior-level. Без воды и клише."
         )
         ttk.Label(a, text=prompt_hint, foreground="#888").pack(anchor=tk.W, pady=(0, 8))
         ttk.Button(a, text="Сохранить промпт", command=self._save_prompt).pack(anchor=tk.W)
@@ -442,8 +447,10 @@ class MeetingCopilotApp:
         self.cfg.save()
 
         self.answer_box.delete('1.0', tk.END)
+        self.processing_cancelled = False  # Сброс флага при новой записи
         self.start_btn.configure(state=tk.DISABLED)
         self.stop_btn.configure(state=tk.NORMAL)
+        self.cancel_btn.configure(state=tk.NORMAL)
         self.status_var.set(f"Запись… Вход: {device}.")
         self.log(f"Начата запись с входа: {device}")
 
@@ -451,10 +458,12 @@ class MeetingCopilotApp:
         self.out_file = os.path.join(os.getcwd(), f"capture_{ts}.wav")
 
         dev = sd.query_devices(device, 'input')
-        sr = float(dev.get('default_samplerate', 48000))
-        ch = int(dev.get('max_input_channels', 2) or 2)
+        # Оптимизация для речи: 16kHz mono (отличное качество, малый размер файла)
+        # 10 минут = ~19 MB (влезает в Whisper API лимит 25 MB)
+        sr = 16000  # 16 kHz достаточно для речи (стандарт телефонии)
+        ch = 1      # Mono - речь не требует стерео
 
-        self.recorder = AudioRecorder(device_name=device, channels=min(2, max(1, ch)), samplerate=sr)
+        self.recorder = AudioRecorder(device_name=device, channels=ch, samplerate=sr)
         self.recorder.start(self.out_file)
         self.start_time = datetime.now()
         self.timer_running = True
@@ -469,6 +478,7 @@ class MeetingCopilotApp:
 
     def stop_and_process(self):
         self.stop_btn.configure(state=tk.DISABLED)
+        self.cancel_btn.configure(state=tk.DISABLED)
         self.timer_running = False
         self.status_var.set("Остановка…")
         if self.recorder:
@@ -480,6 +490,28 @@ class MeetingCopilotApp:
             self.status_var.set("Не было активной записи.")
             self.start_btn.configure(state=tk.NORMAL)
 
+    def cancel_recording(self):
+        """Отменяет текущую запись без обработки"""
+        self.processing_cancelled = True
+        self.timer_running = False
+
+        if self.recorder:
+            wav_path = self.recorder.stop()
+            self.log(f"Запись отменена. Файл удалён: {wav_path}")
+            # Удаляем файл, так как он не нужен
+            try:
+                if wav_path and os.path.exists(wav_path):
+                    os.remove(wav_path)
+            except Exception as e:
+                self.log(f"Не удалось удалить файл: {e}")
+
+        # Возвращаем UI в исходное состояние
+        self.start_btn.configure(state=tk.NORMAL)
+        self.stop_btn.configure(state=tk.DISABLED)
+        self.cancel_btn.configure(state=tk.DISABLED)
+        self.status_var.set("Запись отменена. Готово к новой записи.")
+        self.processing_cancelled = False
+
     def _compose_prompt(self, question_text: str) -> str:
         """
         Собираем промпт:
@@ -488,14 +520,16 @@ class MeetingCopilotApp:
         - если сохранён профиль — приклеиваем как контекст (модель может сослаться на релевантный опыт).
         """
         base = self.cfg.custom_prompt.strip() if self.cfg.custom_prompt else (
-            "Ты — кандидат на позицию Product Manager / Project Manager. "
-            "Отвечай кратко (1–2 предложения), профессионально и от первого лица. "
-            "Фокус на Discovery/Delivery, trade-offs и next steps. Без вводных и воды."
+            "Ты — кандидат на позицию Senior Product Manager / Senior Project Manager. "
+            "Отвечай от первого лица, структурированно (краткий ответ + подробное объяснение). "
+            "Фокус на Discovery/Delivery, frameworks (RICE, ICE, Jobs-to-be-Done), "
+            "trade-offs, метриках и конкретных next steps."
         )
         prompt = (
             f"{base}\n\n"
             "Ниже транскрипт вопроса с собеседования. "
-            "Сконцентрируйся на последнем вопросе и дай прямой ответ, затем короткую рекомендацию.\n\n"
+            "Дай структурированный ответ: сначала краткий (суть решения), затем подробный "
+            "(контекст, обоснование, trade-offs, next steps).\n\n"
             f"Вопрос (транскрипт):\n{question_text}"
         )
         if self.cfg.user_profile:
@@ -504,6 +538,11 @@ class MeetingCopilotApp:
 
     def _transcribe_and_answer(self, wav_path: str):
         try:
+            # Проверка отмены перед началом обработки
+            if self.processing_cancelled:
+                self.log("Обработка отменена пользователем.")
+                return
+
             # 1) Транскрипция
             with open(wav_path, 'rb') as f:
                 tr = self.client.audio.transcriptions.create(
@@ -518,19 +557,34 @@ class MeetingCopilotApp:
             if not text.strip():
                 raise RuntimeError("Пустой транскрипт. Проверьте источник звука/громкость.")
 
+            # Проверка отмены перед генерацией ответа
+            if self.processing_cancelled:
+                self.log("Обработка отменена после транскрипции.")
+                return
+
             # 2) Краткий ответ (PM/PO; учитываем профиль и кастом-промпт)
             full_prompt = self._compose_prompt(text)
             cmp = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": (
-                        "Ты опытный PM/PMO на интервью. Пиши предельно кратко и по делу. "
-                        "Тон уверенный, без воды и клише, без списков. Максимум 2 предложения, до ~40 слов."
+                        "Ты — Senior Product Manager / Senior Project Manager с 7+ годами опыта на интервью.\n\n"
+                        "ФОРМАТ ОТВЕТА:\n"
+                        "**Краткий ответ** (2-3 предложения, ~50-70 слов):\n"
+                        "[Прямой ответ с ключевым решением/подходом]\n\n"
+                        "**Подробно** (3-5 предложений, ~100-130 слов):\n"
+                        "[Контекст, обоснование через frameworks (RICE, ICE, Jobs-to-be-Done), "
+                        "trade-offs, метрики, stakeholder management, конкретные next steps]\n\n"
+                        "СТИЛЬ:\n"
+                        "- Strategic thinking: связывай решения с бизнес-целями\n"
+                        "- Data-driven: ссылайся на метрики и frameworks\n"
+                        "- Senior-level: уверенный тон, без junior-клише\n"
+                        "- Без воды и списков"
                     )},
                     {"role": "user", "content": full_prompt},
                 ],
                 temperature=0.2,
-                max_tokens=140,
+                max_tokens=600,  # Увеличено для краткого + подробного ответа
             )
             answer = cmp.choices[0].message.content.strip()
             self._append_answer(answer)
