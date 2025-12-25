@@ -244,8 +244,8 @@ class MeetingCopilotApp:
         self.status_var = tk.StringVar(value="Готово. Вкладка 'О себе' и промпт будут учтены.")
         ttk.Label(c, textvariable=self.status_var).pack(fill=tk.X, pady=(8, 8))
 
-        ttk.Label(c, text="Ответ (краткий + подробный):").pack(anchor=tk.W)
-        self.answer_box = ScrolledText(c, height=14, wrap=tk.WORD)
+        ttk.Label(c, text="Ответ (краткий + подробный + пример):").pack(anchor=tk.W)
+        self.answer_box = ScrolledText(c, height=18, wrap=tk.WORD)
         self.answer_box.pack(fill=tk.BOTH, expand=True, pady=(2, 10))
 
         ttk.Label(c, text="Журнал:").pack(anchor=tk.W)
@@ -262,12 +262,11 @@ class MeetingCopilotApp:
         self.prompt_box.pack(fill=tk.BOTH, expand=False, pady=(2, 8))
         prompt_hint = (
             "Пример промпта:\n"
-            "Ты — Senior PM/PMO на интервью. Отвечай от первого лица, адаптируясь к типу вопроса:\n"
-            "• Стратегия → бизнес-цели, метрики, приоритизация\n"
-            "• Тактика → процессы, инструменты, конкретные шаги\n"
-            "• Конфликты → stakeholder management, компромиссы\n"
-            "• Поведенческие → примеры из опыта\n"
-            "Frameworks (RICE, Jobs-to-be-Done) — только когда релевантны. Без шаблонов и клише."
+            "Ты — Senior PM/PMO на интервью. Структура ответа:\n"
+            "1) Краткий ответ (2-3 предл.) — суть решения\n"
+            "2) Подробно (3-5 предл.) — обоснование, trade-offs\n"
+            "3) Пример из практики (2-3 предл.) — кейс из топ-компании (Netflix, Spotify, etc.) с метриками\n"
+            "Адаптируйся к типу вопроса. Frameworks — только когда релевантны."
         )
         ttk.Label(a, text=prompt_hint, foreground="#888").pack(anchor=tk.W, pady=(0, 8))
         ttk.Button(a, text="Сохранить промпт", command=self._save_prompt).pack(anchor=tk.W)
@@ -532,9 +531,12 @@ class MeetingCopilotApp:
         prompt = (
             f"{base}\n\n"
             "Ниже транскрипт вопроса с собеседования. "
-            "Проанализируй тип вопроса и дай релевантный ответ:\n"
+            "Проанализируй тип вопроса и дай релевантный ответ в трёх блоках:\n\n"
             "**Краткий ответ** (2-3 предложения) — прямой ответ на вопрос\n"
-            "**Подробно** (3-5 предложений) — обоснование, примеры или next steps (в зависимости от вопроса)\n\n"
+            "**Подробно** (3-5 предложений) — обоснование, trade-offs или next steps\n"
+            "**Пример из практики** (2-3 предложения) — реальный кейс из топ-компании "
+            "(Netflix, Amazon, Spotify, Google, Airbnb, Tesla и т.д.) с измеримым результатом, "
+            "который иллюстрирует твой подход. Укажи компанию, что они сделали и какой эффект получили.\n\n"
             f"Вопрос (транскрипт):\n{question_text}"
         )
         if self.cfg.user_profile:
@@ -581,18 +583,22 @@ class MeetingCopilotApp:
                         "4. Для тактических — конкретные процессы и инструменты\n"
                         "5. Для конфликтов — stakeholder management и компромиссы\n"
                         "6. Для поведенческих — реальные примеры и выводы\n\n"
-                        "ФОРМАТ ОТВЕТА:\n"
+                        "ФОРМАТ ОТВЕТА (3 блока):\n\n"
                         "**Краткий ответ** (2-3 предложения, ~50-70 слов):\n"
                         "[Прямой ответ на вопрос с ключевым решением]\n\n"
                         "**Подробно** (3-5 предложений, ~100-130 слов):\n"
                         "[Контекст, обоснование или примеры — в зависимости от типа вопроса. "
                         "Используй frameworks только если они добавляют ценность.]\n\n"
+                        "**Пример из практики** (2-3 предложения, ~60-80 слов):\n"
+                        "[Реальный кейс из топ-компании (Netflix, Amazon, Spotify, Google, Airbnb, Tesla, Uber, etc.). "
+                        "Укажи: (1) Компанию, (2) Что они сделали конкретно, (3) Измеримый результат (метрики, impact). "
+                        "Выбирай кейсы, которые релевантны вопросу и иллюстрируют best practices.]\n\n"
                         "СТИЛЬ: Уверенный senior-level, конкретный, без клише и воды."
                     )},
                     {"role": "user", "content": full_prompt},
                 ],
                 temperature=0.3,  # Немного повышено для более естественных ответов
-                max_tokens=600,  # Увеличено для краткого + подробного ответа
+                max_tokens=900,  # Увеличено для 3 блоков: краткий + подробный + пример
             )
             answer = cmp.choices[0].message.content.strip()
             self._append_answer(answer)
